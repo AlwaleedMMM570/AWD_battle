@@ -1,12 +1,15 @@
 const http=require('http'),fs=require('fs'),path=require('path');
 const {WebSocketServer}=require('ws');
-const PUB=path.join(__dirname,'public');
+const OK=new Set(['index.html','manifest.json','icon-192.png','icon-512.png']);
 const TYPES={'.html':'text/html; charset=utf-8','.json':'application/json','.png':'image/png'};
+function find(n){for(const d of [__dirname,path.join(__dirname,'public')]){const f=path.join(d,n);if(fs.existsSync(f))return f}return null}
 const server=http.createServer((req,res)=>{
   let p=decodeURIComponent(req.url.split('?')[0]);if(p==='/')p='/index.html';
-  const f=path.normalize(path.join(PUB,p));
-  if(!f.startsWith(PUB)){res.writeHead(403);return res.end()}
-  fs.readFile(f,(e,d)=>{if(e){res.writeHead(404);return res.end('Not found')}
+  const n=p.slice(1);
+  if(!OK.has(n)){res.writeHead(404);return res.end('Not found')}
+  const f=find(n);
+  if(!f){res.writeHead(404);return res.end('File missing: '+n)}
+  fs.readFile(f,(e,d)=>{if(e){res.writeHead(500);return res.end('Error')}
     res.writeHead(200,{'Content-Type':TYPES[path.extname(f)]||'application/octet-stream'});res.end(d)});
 });
 const wss=new WebSocketServer({server,path:'/ws',maxPayload:4096});
@@ -34,3 +37,4 @@ wss.on('connection',(ws,req)=>{
 });
 setInterval(()=>{wss.clients.forEach(c=>{if(!c.alive)return c.terminate();c.alive=false;c.ping()})},30000);
 server.listen(process.env.PORT||3000,()=>console.log('running'));
+  
