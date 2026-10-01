@@ -1,3 +1,4 @@
+
 const http=require('http'),fs=require('fs'),path=require('path');
 const {WebSocketServer}=require('ws');
 const OK=new Set(['index.html','manifest.json','icon-192.png','icon-512.png']);
