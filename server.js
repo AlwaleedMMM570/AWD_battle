@@ -14,9 +14,11 @@ function latest(){try{const g=fs.readdirSync(__dirname).filter(f=>/^game-[A-Za-z
 function find(n){for(const d of [__dirname,path.join(__dirname,'public')]){const f=path.join(d,n);if(fs.existsSync(f))return f}return null}
 /* ---------- database (Supabase REST, table "players") ---------- */
 async function sb(method,qs,body){
-  const r=await fetch(SB_URL+'/rest/v1/players'+qs,{method,headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':'application/json',Prefer:'return=representation'},body:body?JSON.stringify(body):undefined});
+  const h={apikey:SB_KEY,'Content-Type':'application/json',Prefer:'return=representation'};
+  if(/^eyJ/.test(SB_KEY))h.Authorization='Bearer '+SB_KEY; /* new sb_secret_ keys go in "apikey" only */
+  const r=await fetch(SB_URL+'/rest/v1/players'+qs,{method,headers:h,body:body?JSON.stringify(body):undefined});
   const t=await r.text();let j=null;try{j=t?JSON.parse(t):null}catch(e){}
-  if(!r.ok){const e=new Error('db '+r.status);e.status=r.status;throw e}
+  if(!r.ok){const e=new Error('db '+r.status);e.status=r.status;e.detail=String((j&&(j.message||j.hint||j.error))||t||'').slice(0,160);console.log('supabase error',method,r.status,e.detail);throw e}
   return j;
 }
 async function getUser(u){const a=await sb('GET','?username=eq.'+encodeURIComponent(u)+'&select=*');return a&&a[0]||null}
@@ -44,6 +46,10 @@ function cleanImp(im){const o={coins:0,own:{},eq:{},codes:{}};if(!im||typeof im!
 /* ---------- JSON API ---------- */
 function api(req,res,route){
   const send=(c,o)=>{res.writeHead(c,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(o))};
+  if(route==='health'){
+    if(!ACC)return send(200,{accounts:false,why:'SUPABASE_URL or SUPABASE_KEY is missing'});
+    return sb('GET','?select=username&limit=1').then(()=>send(200,{accounts:true,db:'ok'}),e=>send(200,{accounts:true,db:'fail',status:e.status||0,detail:e.detail||String(e.message).slice(0,120)}));
+  }
   if(req.method!=='POST')return send(405,{err:'method'});
   if(!ACC)return send(503,{err:'cfg'});
   let b='';req.on('data',d=>{b+=d;if(b.length>8192)req.destroy()});
@@ -93,7 +99,7 @@ function api(req,res,route){
           used[code]=1;const n=await patchUser(uid,{coins:(r.coins|0)+amt,codes:used});return send(200,{ok:1,add:amt,me:pub(n)})}
         return send(404,{err:'route'});
       });
-    }catch(e){try{send(500,{err:'server'})}catch(x){}}
+    }catch(e){console.log('api error',route,e&&e.message,e&&e.detail||'');try{send(500,{err:'server'})}catch(x){}}
   });
 }
 const server=http.createServer((req,res)=>{
