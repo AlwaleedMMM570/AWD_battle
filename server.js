@@ -7,6 +7,8 @@ const SECRET=process.env.TOKEN_SECRET||crypto.createHash('sha256').update('awd|'
 const CODES={FRTCDE123067:1000};
 (process.env.CODES||'').split(',').forEach(p=>{const a=p.trim().split(':'),c=(a[0]||'').toUpperCase(),n=+a[1];if(/^[A-Z0-9]{1,20}$/.test(c)&&n>0)CODES[c]=n});
 const PRICE=[0,25,40];
+const normU=x=>String(x||'').trim().normalize('NFKC');
+const okUser=x=>{const n=Array.from(x).length;return n>=3&&n<=16&&/^[\p{L}\p{N}_]+$/u.test(x)};
 /* ---------- static files ---------- */
 const TYPES={'.html':'text/html; charset=utf-8','.json':'application/json','.png':'image/png'};
 const SAFE=/^(index|game-[A-Za-z0-9_.-]+)\.html$|^(manifest\.json|icon-(192|512)\.png)$/;
@@ -58,26 +60,26 @@ function api(req,res,route){
     try{
       const ip=ipOf(req);if(lim(limApi,ip,150,60000))return send(429,{err:'rate'});
       if(route==='register'){
-        if(lim(limReg,ip,6,3600000))return send(429,{err:'rate'});
-        const u=String(j.u||'').trim(),pw=String(j.p||'');
-        if(!/^[A-Za-z0-9_]{3,16}$/.test(u))return send(400,{err:'user'});
-        if(pw.length<6||pw.length>64)return send(400,{err:'pass'});
+        if(lim(limReg,ip,30,3600000))return send(429,{err:'rate'});
+        const u=normU(j.u),pw=String(j.p||'');
+        if(!okUser(u))return send(400,{err:'user'});
+        if(pw.length<4||pw.length>64)return send(400,{err:'pass'});
         const key=u.toLowerCase();if(await getUser(key))return send(409,{err:'taken'});
         const imp=cleanImp(j.imp),hp=await hashPw(pw);let row;
         try{const a=await sb('POST','',{username:key,display:u,pass:hp,coins:imp.coins,own:imp.own,eq:imp.eq,codes:imp.codes,friends:[],wins:0,losses:0});row=a&&a[0]}catch(e){if(e.status===409)return send(409,{err:'taken'});throw e}
         return send(200,{ok:1,token:mkTok(key,u),me:pub(row)});
       }
       if(route==='login'){
-        if(lim(limLogin,ip,10,60000))return send(429,{err:'rate'});
-        const u=String(j.u||'').trim().toLowerCase(),r=/^[a-z0-9_]{3,16}$/.test(u)?await getUser(u):null;
+        if(lim(limLogin,ip,40,60000))return send(429,{err:'rate'});
+        const u=normU(j.u).toLowerCase(),r=okUser(u)?await getUser(u):null;
         if(!r||!(await checkPw(String(j.p||''),r.pass)))return send(401,{err:'bad'});
         return send(200,{ok:1,token:mkTok(u,r.display||u),me:pub(r)});
       }
       const who=vfTok(String(req.headers.authorization||'').replace(/^Bearer\s+/i,''));if(!who)return send(401,{err:'auth'});const uid=who.u;
       if(route==='me'){const r=await getUser(uid);if(!r)return send(401,{err:'auth'});return send(200,{ok:1,me:pub(r)})}
       if(route==='friend'){
-        const t=String(j.u||'').trim().toLowerCase(),del=j.a==='del';
-        if(!/^[a-z0-9_]{3,16}$/.test(t)||t===uid)return send(400,{err:'user'});
+        const t=normU(j.u).toLowerCase(),del=j.a==='del';
+        if(!okUser(t)||t===uid)return send(400,{err:'user'});
         const tr=await getUser(t);if(!del&&!tr)return send(200,{ok:0,err:'nf'});
         const res1=await withLock(uid,async()=>{const r=await getUser(uid);let f=Array.isArray(r.friends)?r.friends.slice():[];
           if(!del){if(f.includes(t))return{err:'dup',r};if(f.length>=100)return{err:'full',r};f.push(t)}else f=f.filter(x=>x!==t);return{r:await patchUser(uid,{friends:f})}});
