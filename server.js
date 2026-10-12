@@ -27,7 +27,7 @@ async function getUser(u){const a=await sb('GET','?username=eq.'+encodeURICompon
 async function patchUser(u,o){const a=await sb('PATCH','?username=eq.'+encodeURIComponent(u),o);return a&&a[0]||null}
 const locks=new Map();
 function withLock(u,fn){const p=(locks.get(u)||Promise.resolve()).then(fn,fn);locks.set(u,p.catch(()=>{}));return p}
-function pub(r){return{u:r.display||r.username,k:r.username,coins:r.coins|0,own:r.own||{},eq:r.eq||{},friends:Array.isArray(r.friends)?r.friends:[],wins:r.wins|0,losses:r.losses|0}}
+function pub(r){return{u:r.display||r.username,k:r.username,coins:r.coins|0,own:r.own||{},eq:r.eq||{},friends:Array.isArray(r.friends)?r.friends:[],wins:r.wins|0,losses:r.losses|0,chars:(r.chars&&typeof r.chars==='object')?r.chars:{}}}
 /* ---------- passwords + tokens ---------- */
 function hashPw(p,salt){salt=salt||crypto.randomBytes(16).toString('hex');return new Promise((res,rej)=>crypto.scrypt(p,salt,32,(e,k)=>e?rej(e):res(salt+':'+k.toString('hex'))))}
 async function checkPw(p,stored){try{const salt=String(stored).split(':')[0],x=await hashPw(p,salt);return x.length===stored.length&&crypto.timingSafeEqual(Buffer.from(x),Buffer.from(stored))}catch(e){return false}}
@@ -77,6 +77,13 @@ function api(req,res,route){
       }
       const who=vfTok(String(req.headers.authorization||'').replace(/^Bearer\s+/i,''));if(!who)return send(401,{err:'auth'});const uid=who.u;
       if(route==='me'){const r=await getUser(uid);if(!r)return send(401,{err:'auth'});return send(200,{ok:1,me:pub(r)})}
+      if(route==='top'){
+        const now=Date.now();
+        if(!topCache.rows||now-topCache.t>30000){const a=await sb('GET','?select=username,display,wins,losses&wins=gt.0&order=wins.desc,losses.asc&limit=20');topCache={t:now,rows:a||[]}}
+        const r=await getUser(uid);let rank=0;
+        if(r&&(r.wins|0)>0){const a=await sb('GET','?select=username&wins=gt.'+(r.wins|0)+'&limit=1000');rank=(a?a.length:0)+1}
+        return send(200,{ok:1,rows:topCache.rows.map((x,i)=>({r:i+1,u:x.display||x.username,k:x.username,w:x.wins|0,l:x.losses|0})),me:{rank,w:r?r.wins|0:0,l:r?r.losses|0:0}});
+      }
       if(route==='friend'){
         const t=normU(j.u).toLowerCase(),del=j.a==='del';
         if(!okUser(t)||t===uid)return send(400,{err:'user'});
@@ -125,15 +132,20 @@ server.on('upgrade',(req,sock,head)=>{
 });
 /* ---------- match rooms (+ server-side win detection) ---------- */
 const rooms=new Map();
-async function award(wu,lu,wws){
+let topCache={t:0,rows:null};
+async function award(wu,lu,wws,wch,lch){
   try{
     const pk=[wu,lu].sort().join('|'),day=new Date().toISOString().slice(0,10)+wu;
     if(lim(pairHits,pk,8,3600000))return;
     const dc=(dayHits.get(day)||0)+1;dayHits.set(day,dc);if(dc>60)return;
-    const w=await withLock(wu,async()=>{const u=await getUser(wu);return u?await patchUser(wu,{coins:(u.coins|0)+1,wins:(u.wins|0)+1}):null});
-    await withLock(lu,async()=>{const u=await getUser(lu);if(u)await patchUser(lu,{losses:(u.losses|0)+1})});
+    const bump=(u,ch)=>{const c=Object.assign({},(u.chars&&typeof u.chars==='object')?u.chars:{});ch|=0;if(ch>=0&&ch<10)c[ch]=(c[ch]|0)+1;return c};
+    const upd=(name,ch,fn)=>withLock(name,async()=>{const u=await getUser(name);if(!u)return null;const base=fn(u);
+      try{return await patchUser(name,Object.assign({},base,{chars:bump(u,ch)}))}catch(e){if(e.status===400)return await patchUser(name,base);throw e}});
+    const w=await upd(wu,wch,u=>({coins:(u.coins|0)+1,wins:(u.wins|0)+1}));
+    await upd(lu,lch,u=>({losses:(u.losses|0)+1}));
+    topCache.t=0;
     if(w&&wws&&wws.readyState===1)wws.send(JSON.stringify({t:'award',add:1,coins:w.coins|0}));
-  }catch(e){}
+  }catch(e){console.log('award error',e&&e.message)}
 }
 function judge(set){
   if(!ACC)return;const a=[...set].filter(w=>w.user&&w.last&&w.last.g);if(a.length!==2)return;
@@ -142,7 +154,7 @@ function judge(set){
   if(set.done||sum<rounds)return;set.done=true;
   if(la===lb||Date.now()-(set.since||0)<10000)return;
   const w=la<lb?a[0]:a[1],l=w===a[0]?a[1]:a[0];if(w.user===l.user)return;
-  award(w.user,l.user,w);
+  award(w.user,l.user,w,w.last.ch,l.last.ch);
 }
 wss.on('connection',(ws,req)=>{
   const q=new URL(req.url,'http://x').searchParams,room=(q.get('room')||'').toLowerCase();
@@ -204,4 +216,4 @@ cws.on('connection',ws=>{
 });
 setInterval(()=>{[wss,cws].forEach(x=>x.clients.forEach(c=>{if(!c.alive)return c.terminate();c.alive=false;c.ping()}))},30000);
 server.listen(process.env.PORT||3000,()=>console.log('running'+(ACC?' (accounts on)':' (accounts OFF: set SUPABASE_URL and SUPABASE_KEY)')));
-    
+  
