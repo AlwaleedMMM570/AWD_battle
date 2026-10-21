@@ -5,7 +5,8 @@ const SB_URL=(process.env.SUPABASE_URL||'').replace(/\/+$/,''),SB_KEY=process.en
 const ACC=!!(SB_URL&&SB_KEY);
 const SECRET=process.env.TOKEN_SECRET||crypto.createHash('sha256').update('awd|'+SB_KEY).digest('hex');
 const CODES={FRTCDE123067:1000};
-(process.env.CODES||'').split(',').forEach(p=>{const a=p.trim().split(':'),c=(a[0]||'').toUpperCase(),n=+a[1];if(/^[A-Z0-9]{1,20}$/.test(c)&&n>0)CODES[c]=n});
+(process.env.CODES||'').split(',').forEach(p=>{const a=p.trim().split(':'),c=(a[0]||'').toUpperCase(),n=+a[1];if(/^[A-Z0-9_]{1,24}$/.test(c)&&n>0)CODES[c]=n});
+const SPECIAL={'20FSFFNB10_10':'rareSkin'};
 const PRICE=[0,25,40];
 const normU=x=>String(x||'').trim().normalize('NFKC');
 const okUser=x=>{const n=Array.from(x).length;return n>=3&&n<=16&&/^[\p{L}\p{N}_]+$/u.test(x)};
@@ -103,9 +104,17 @@ function api(req,res,route){
           own[k]=1;const eq=r.eq||{};eq[ch]=s;const n=await patchUser(uid,{coins:(r.coins|0)-PRICE[s],own,eq});return send(200,{ok:1,me:pub(n)})}
         if(route==='equip'){const ch=j.ch|0,s=j.s|0;if(ch<0||ch>9||s<0||s>2)return send(400,{err:'arg'});const own=r.own||{};if(s>0&&!own[ch+'_'+s])return send(200,{ok:0,err:'notowned',me:pub(r)});
           const eq=r.eq||{};eq[ch]=s;const n=await patchUser(uid,{eq});return send(200,{ok:1,me:pub(n)})}
-        if(route==='redeem'){const code=String(j.code||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,20),amt=code?CODES[code]:0;
-          if(!amt)return send(200,{ok:0,err:'bad',me:pub(r)});const used=r.codes||{};if(used[code])return send(200,{ok:0,err:'used',me:pub(r)});
-          used[code]=1;const n=await patchUser(uid,{coins:(r.coins|0)+amt,codes:used});return send(200,{ok:1,add:amt,me:pub(n)})}
+        if(route==='redeem'){const code=String(j.code||'').toUpperCase().replace(/[^A-Z0-9_]/g,'').slice(0,24),used=r.codes||{};
+          if(SPECIAL[code]){
+            if(used[code])return send(200,{ok:0,err:'used',me:pub(r)});
+            const own=r.own||{},eq=r.eq||{},pool=[];for(let ch=0;ch<10;ch++)if(!own[ch+'_1'])pool.push(ch);
+            used[code]=1;
+            if(pool.length){const ch=pool[crypto.randomInt(pool.length)];own[ch+'_1']=1;if(!eq[ch])eq[ch]=1;const n=await patchUser(uid,{own,eq,codes:used});return send(200,{ok:1,special:1,kind:'skin',ch,s:1,me:pub(n)})}
+            const n=await patchUser(uid,{coins:(r.coins|0)+25,codes:used});return send(200,{ok:1,special:1,kind:'coins',add:25,me:pub(n)});
+          }
+          const amt=code?CODES[code]:0;
+          if(!amt)return send(200,{ok:0,err:'bad',me:pub(r)});if(used[code])return send(200,{ok:0,err:'used',me:pub(r)});
+          used[code]=1;const n=await patchUser(uid,{coins:(r.coins|0)+amt,codes:used});return send(200,{ok:1,kind:'coins',add:amt,me:pub(n)})}
         return send(404,{err:'route'});
       });
     }catch(e){console.log('api error',route,e&&e.message,e&&e.detail||'');try{send(500,{err:'server'})}catch(x){}}
@@ -216,4 +225,4 @@ cws.on('connection',ws=>{
 });
 setInterval(()=>{[wss,cws].forEach(x=>x.clients.forEach(c=>{if(!c.alive)return c.terminate();c.alive=false;c.ping()}))},30000);
 server.listen(process.env.PORT||3000,()=>console.log('running'+(ACC?' (accounts on)':' (accounts OFF: set SUPABASE_URL and SUPABASE_KEY)')));
-  
+                                     
