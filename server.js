@@ -42,8 +42,8 @@ function ipOf(req){return((req.headers['x-forwarded-for']||'').split(',')[0].tri
 /* ---------- import of an old local wallet (first registration only) ---------- */
 function cleanImp(im){const o={coins:0,own:{},eq:{},codes:{}};if(!im||typeof im!=='object')return o;
   o.coins=Math.max(0,Math.min(1100,(+im.coins|0)||0));
-  if(im.own&&typeof im.own==='object')for(const k of Object.keys(im.own)){const m=/^(\d)_([12])$/.exec(k);if(m&&im.own[k])o.own[k]=1}
-  if(im.eq&&typeof im.eq==='object')for(const k of Object.keys(im.eq)){const ch=+k,s=im.eq[k]|0;if(ch>=0&&ch<10&&(s===0||o.own[ch+'_'+s]))o.eq[ch]=s}
+  if(im.own&&typeof im.own==='object')for(const k of Object.keys(im.own)){const m=/^(\d{1,2})_([12])$/.exec(k);if(m&&im.own[k])o.own[k]=1}
+  if(im.eq&&typeof im.eq==='object')for(const k of Object.keys(im.eq)){const ch=+k,s=im.eq[k]|0;if(ch>=0&&ch<11&&(s===0||o.own[ch+'_'+s]))o.eq[ch]=s}
   if(im.codes&&typeof im.codes==='object')for(const k of Object.keys(im.codes)){const c=String(k).toUpperCase();if(CODES[c])o.codes[c]=1}
   return o}
 /* ---------- JSON API ---------- */
@@ -99,15 +99,15 @@ function api(req,res,route){
       }
       return await withLock(uid,async()=>{
         const r=await getUser(uid);if(!r)return send(401,{err:'auth'});
-        if(route==='buy'){const ch=j.ch|0,s=j.s|0;if(ch<0||ch>9||(s!==1&&s!==2))return send(400,{err:'arg'});
+        if(route==='buy'){const ch=j.ch|0,s=j.s|0;if(ch<0||ch>10||(s!==1&&s!==2))return send(400,{err:'arg'});
           const k=ch+'_'+s,own=r.own||{};if(own[k])return send(200,{ok:0,err:'owned',me:pub(r)});if((r.coins|0)<PRICE[s])return send(200,{ok:0,err:'poor',me:pub(r)});
           own[k]=1;const eq=r.eq||{};eq[ch]=s;const n=await patchUser(uid,{coins:(r.coins|0)-PRICE[s],own,eq});return send(200,{ok:1,me:pub(n)})}
-        if(route==='equip'){const ch=j.ch|0,s=j.s|0;if(ch<0||ch>9||s<0||s>2)return send(400,{err:'arg'});const own=r.own||{};if(s>0&&!own[ch+'_'+s])return send(200,{ok:0,err:'notowned',me:pub(r)});
+        if(route==='equip'){const ch=j.ch|0,s=j.s|0;if(ch<0||ch>10||s<0||s>2)return send(400,{err:'arg'});const own=r.own||{};if(s>0&&!own[ch+'_'+s])return send(200,{ok:0,err:'notowned',me:pub(r)});
           const eq=r.eq||{};eq[ch]=s;const n=await patchUser(uid,{eq});return send(200,{ok:1,me:pub(n)})}
         if(route==='redeem'){const code=String(j.code||'').toUpperCase().replace(/[^A-Z0-9_]/g,'').slice(0,24),used=r.codes||{};
           if(SPECIAL[code]){
             if(used[code])return send(200,{ok:0,err:'used',me:pub(r)});
-            const own=r.own||{},eq=r.eq||{},pool=[];for(let ch=0;ch<10;ch++)if(!own[ch+'_1'])pool.push(ch);
+            const own=r.own||{},eq=r.eq||{},pool=[];for(let ch=0;ch<11;ch++)if(!own[ch+'_1'])pool.push(ch);
             used[code]=1;
             if(pool.length){const ch=pool[crypto.randomInt(pool.length)];own[ch+'_1']=1;if(!eq[ch])eq[ch]=1;const n=await patchUser(uid,{own,eq,codes:used});return send(200,{ok:1,special:1,kind:'skin',ch,s:1,me:pub(n)})}
             const n=await patchUser(uid,{coins:(r.coins|0)+25,codes:used});return send(200,{ok:1,special:1,kind:'coins',add:25,me:pub(n)});
@@ -147,7 +147,7 @@ async function award(wu,lu,wws,wch,lch){
     const pk=[wu,lu].sort().join('|'),day=new Date().toISOString().slice(0,10)+wu;
     if(lim(pairHits,pk,8,3600000))return;
     const dc=(dayHits.get(day)||0)+1;dayHits.set(day,dc);if(dc>60)return;
-    const bump=(u,ch)=>{const c=Object.assign({},(u.chars&&typeof u.chars==='object')?u.chars:{});ch|=0;if(ch>=0&&ch<10)c[ch]=(c[ch]|0)+1;return c};
+    const bump=(u,ch)=>{const c=Object.assign({},(u.chars&&typeof u.chars==='object')?u.chars:{});ch|=0;if(ch>=0&&ch<11)c[ch]=(c[ch]|0)+1;return c};
     const upd=(name,ch,fn)=>withLock(name,async()=>{const u=await getUser(name);if(!u)return null;const base=fn(u);
       try{return await patchUser(name,Object.assign({},base,{chars:bump(u,ch)}))}catch(e){if(e.status===400)return await patchUser(name,base);throw e}});
     const w=await upd(wu,wch,u=>({coins:(u.coins|0)+1,wins:(u.wins|0)+1}));
@@ -225,4 +225,4 @@ cws.on('connection',ws=>{
 });
 setInterval(()=>{[wss,cws].forEach(x=>x.clients.forEach(c=>{if(!c.alive)return c.terminate();c.alive=false;c.ping()}))},30000);
 server.listen(process.env.PORT||3000,()=>console.log('running'+(ACC?' (accounts on)':' (accounts OFF: set SUPABASE_URL and SUPABASE_KEY)')));
-                                     
+    
